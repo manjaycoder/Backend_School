@@ -2,7 +2,7 @@
 CREATE DATABASE IF NOT EXISTS school_db;
 -- Table: students
 use school_db;
-
+---man
 SELECT id, admissionNumber, firstName, middleName, lastName, class, section, routeName, fatherName
 FROM students
 WHERE admissionNumber LIKE '%F12%';
