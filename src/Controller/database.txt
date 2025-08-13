@@ -1,0 +1,430 @@
+-- Create the database if it does not exist
+CREATE DATABASE IF NOT EXISTS school_db;
+-- Table: students
+use school_db;
+
+SELECT id, admissionNumber, firstName, middleName, lastName, class, section, routeName, fatherName
+FROM students
+WHERE admissionNumber LIKE '%F12%';
+SELECT month FROM student_months WHERE admissionNo  LIKE `%XYZ%`;
+CREATE TABLE IF NOT EXISTS students (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admissionNumber VARCHAR(132) UNIQUE,
+  firstName VARCHAR(100) NOT NULL,
+  lastName VARCHAR(100) NOT NULL,
+  middleName VARCHAR(100),
+  dob DATE NOT NULL,
+  class VARCHAR(50) NOT NULL,
+  section VARCHAR(10) NOT NULL,
+  routeName VARCHAR(100), -- Added route name
+  email VARCHAR(100),
+  bloodGroup VARCHAR(10),
+  gender VARCHAR(10),
+  height VARCHAR(10),
+  weight VARCHAR(10),
+  category VARCHAR(50),
+  religion VARCHAR(50),
+  caste VARCHAR(50),
+  fatherName VARCHAR(100) NOT NULL,
+  fatherPhoneNumber VARCHAR(20) NOT NULL,
+  fatherOccupation VARCHAR(100),
+  fatherQualification VARCHAR(100),
+  fatherAdharNo VARCHAR(20),
+  fatherImage VARCHAR(255),
+  motherName VARCHAR(100),
+  motherPhoneNumber VARCHAR(20),
+  motherOccupation VARCHAR(100),
+  motherAdharNo VARCHAR(20),
+  motherImage VARCHAR(255),
+  documents JSON,
+  admissionDate DATE,
+  rollNo VARCHAR(20),
+  currentAddress TEXT,
+  permanentAddress TEXT,
+  months TEXT
+);
+select * from students;
+SHOW COLUMNS FROM fees_register;
+SELECT price FROM route_plans;
+select * from fees_register;
+
+select * from students;
+CREATE TABLE routes (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  route_name VARCHAR(100) NOT NULL,
+  frequency VARCHAR(50) NOT NULL,
+  months TEXT NOT NULL
+);
+ALTER TABLE routes MODIFY COLUMN months TEXT;
+
+INSERT INTO student_months (admissionNo, month)
+SELECT s.admissionNumber, m.month
+FROM students s
+CROSS JOIN (
+    SELECT 'Apr' AS month UNION ALL SELECT 'May' UNION ALL SELECT 'Jun' UNION ALL SELECT 'Jul' UNION ALL
+    SELECT 'Aug' UNION ALL SELECT 'Sep' UNION ALL SELECT 'Oct' UNION ALL SELECT 'Nov' UNION ALL
+    SELECT 'Dec' UNION ALL SELECT 'Jan' UNION ALL SELECT 'Feb' UNION ALL SELECT 'Mar'
+) m;
+SET SQL_SAFE_UPDATES = 0;
+UPDATE routes
+SET months = 'Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar';
+SET SQL_SAFE_UPDATES = 1;
+
+-- 500
+
+INSERT IGNORE INTO student_months (admissionNo, month)
+SELECT s.admissionNumber, m.month
+FROM students s
+CROSS JOIN (
+    SELECT 'Apr' AS month UNION ALL SELECT 'May' UNION ALL SELECT 'Jun' UNION ALL SELECT 'Jul' UNION ALL
+    SELECT 'Aug' UNION ALL SELECT 'Sep' UNION ALL SELECT 'Oct' UNION ALL SELECT 'Nov' UNION ALL
+    SELECT 'Dec' UNION ALL SELECT 'Jan' UNION ALL SELECT 'Feb' UNION ALL SELECT 'Mar'
+) m
+WHERE NOT EXISTS (
+    SELECT 1 FROM student_months sm 
+    WHERE sm.admissionNo = s.admissionNumber AND sm.month = m.month
+);
+
+
+
+CREATE TABLE IF NOT EXISTS route_plans (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    class_name VARCHAR(50),
+    category_name VARCHAR(50), 
+    route_name VARCHAR(100),
+    price DECIMAL(10,2)
+);
+select value from fees_plan where className ='10th' AND category ='New Student';
+
+SELECT price FROM route_plans WHERE class_name = '10th' AND category_name = 'New Student' AND route_name = 'KARNAL';
+select * from route_plans;
+-- Step 1: Add Total Fee Columns to student_months
+ALTER TABLE student_months 
+ADD COLUMN class_fee DECIMAL(10,2) DEFAULT 0,
+ADD COLUMN route_fee DECIMAL(10,2) DEFAULT 0,
+ADD COLUMN total_fee DECIMAL(10,2) DEFAULT 0;
+-- Step 2: Update student_months with Class Fee + Route Fee
+
+SET SQL_SAFE_UPDATES = 0;
+-- Step 4: To Recalculate for All Existing Students
+UPDATE student_months sm
+JOIN students s ON sm.admissionNo = s.admissionNumber
+LEFT JOIN (
+    SELECT className, category, SUM(value) AS class_fee
+    FROM fees_plan
+    GROUP BY className, category
+) fp ON fp.className = s.class AND fp.category = s.category
+LEFT JOIN route_plans rp
+    ON rp.class_name = s.class
+    AND rp.category_name = s.category
+    AND rp.route_name = s.routeName
+JOIN routes r
+    ON r.route_name = s.routeName
+SET 
+    sm.class_fee = COALESCE(fp.class_fee, 0),
+    sm.route_fee = CASE WHEN FIND_IN_SET(sm.month, r.months) > 0 THEN COALESCE(rp.price, 0) ELSE 0 END,
+    sm.total_fee = COALESCE(fp.class_fee, 0) + 
+                   CASE WHEN FIND_IN_SET(sm.month, r.months) > 0 THEN COALESCE(rp.price, 0) ELSE 0 END;
+
+SET SQL_SAFE_UPDATES = 1;
+-- Step 3: Automate Fee Calculation for New Students
+DELIMITER $$
+
+DROP TRIGGER IF EXISTS after_student_insert $$
+SELECT * FROM students;
+CREATE TRIGGER after_student_insert
+AFTER INSERT ON students
+FOR EACH ROW
+BEGIN
+    INSERT INTO student_months (admissionNo, month, class_fee, route_fee, total_fee)
+    SELECT 
+        NEW.admissionNumber,
+        m.month,
+        COALESCE(
+            (SELECT SUM(value) FROM fees_plan 
+             WHERE className = NEW.class AND category = NEW.category), 0) AS class_fee,
+        COALESCE(
+            (SELECT price FROM route_plans 
+             WHERE class_name = NEW.class 
+             AND category_name = NEW.category 
+             AND route_name = NEW.routeName), 0) AS route_fee,
+        COALESCE(
+            (SELECT SUM(value) FROM fees_plan 
+             WHERE className = NEW.class AND category = NEW.category), 0) + 
+        COALESCE(
+            (SELECT price FROM route_plans 
+             WHERE class_name = NEW.class 
+             AND category_name = NEW.category 
+             AND route_name = NEW.routeName), 0) AS total_fee
+    FROM (
+        SELECT 'Apr' AS month UNION ALL SELECT 'May' UNION ALL SELECT 'Jun' UNION ALL 
+        SELECT 'Jul' UNION ALL SELECT 'Aug' UNION ALL SELECT 'Sep' UNION ALL 
+        SELECT 'Oct' UNION ALL SELECT 'Nov' UNION ALL SELECT 'Dec' UNION ALL 
+        SELECT 'Jan' UNION ALL SELECT 'Feb' UNION ALL SELECT 'Mar'
+    ) m;
+END $$
+SELECT * FROM fees_plan;
+DELIMITER ;
+
+select * from students;
+-- Table: student_months
+INSERT IGNORE INTO student_months (admissionNo, month)
+SELECT s.admissionNumber, m.month
+FROM students s
+CROSS JOIN (
+    SELECT 'Apr' AS month UNION ALL SELECT 'May' UNION ALL SELECT 'Jun' UNION ALL SELECT 'Jul' UNION ALL
+    SELECT 'Aug' UNION ALL SELECT 'Sep' UNION ALL SELECT 'Oct' UNION ALL SELECT 'Nov' UNION ALL
+    SELECT 'Dec' UNION ALL SELECT 'Jan' UNION ALL SELECT 'Feb' UNION ALL SELECT 'Mar'
+) m
+WHERE NOT EXISTS (
+    SELECT 1 FROM student_months sm 
+    WHERE sm.admissionNo = s.admissionNumber
+);
+UPDATE student_months sm
+JOIN students s ON sm.admissionNo = s.admissionNumber
+LEFT JOIN (
+    SELECT className, category, SUM(value) AS class_fee
+    FROM fees_plan
+    GROUP BY className, category
+) fp ON fp.className = s.class AND fp.category = s.category
+LEFT JOIN route_plans rp
+    ON rp.class_name = s.class
+    AND rp.category_name = s.category
+    AND rp.route_name = s.routeName
+JOIN routes r
+    ON r.route_name = s.routeName
+SET 
+    sm.class_fee = COALESCE(fp.class_fee, 0),
+    sm.route_fee = CASE WHEN FIND_IN_SET(sm.month, r.months) > 0 THEN COALESCE(rp.price, 0) ELSE 0 END,
+    sm.total_fee = COALESCE(fp.class_fee, 0) + 
+                   CASE WHEN FIND_IN_SET(sm.month, r.months) > 0 THEN COALESCE(rp.price, 0) ELSE 0 END;
+--  Step 5: Use Total Fees in fees_register
+DELIMITER $$
+
+CREATE OR REPLACE PROCEDURE ApplyStudentFees(
+    IN p_admissionNumber VARCHAR(132), 
+    IN p_month VARCHAR(20)
+)
+BEGIN
+    DECLARE v_total_fee DECIMAL(10,2);
+    DECLARE v_student_name VARCHAR(200);
+    DECLARE v_class VARCHAR(50);
+    DECLARE v_category VARCHAR(50);
+    DECLARE v_routeName VARCHAR(100);
+
+    SELECT CONCAT(firstName, ' ', lastName), class, category, routeName
+    INTO v_student_name, v_class, v_category, v_routeName
+    FROM students
+    WHERE admissionNumber = p_admissionNumber;
+
+    SELECT total_fee
+    INTO v_total_fee
+    FROM student_months
+    WHERE admissionNo = p_admissionNumber AND month = p_month;
+
+    INSERT INTO fees_register 
+        (date, rec_no, admissionNumber, student_name, class, category, route, months, fees, total, recd_amt, balance)
+    VALUES 
+        (CURDATE(), CONCAT('REC-', p_admissionNumber, '-', p_month), 
+         p_admissionNumber, v_student_name, v_class, v_category, v_routeName, 
+         p_month, v_total_fee, v_total_fee, 0, v_total_fee);
+END $$
+
+DELIMITER ;
+
+UPDATE routes 
+SET months = 'Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar' 
+WHERE id IN (
+    SELECT * FROM (
+        SELECT id FROM routes 
+        WHERE months IS NULL OR months = ''
+    ) AS temp
+);
+
+DELIMITER $$
+select * from fees_plan;
+CREATE TRIGGER after_student_insert
+AFTER INSERT ON students
+FOR EACH ROW
+BEGIN
+    INSERT INTO student_months (admissionNo, month)
+    SELECT NEW.admissionNumber, m.month
+    FROM (
+        SELECT 'Apr' AS month UNION ALL SELECT 'May' UNION ALL SELECT 'Jun' UNION ALL 
+        SELECT 'Jul' UNION ALL SELECT 'Aug' UNION ALL SELECT 'Sep' UNION ALL 
+        SELECT 'Oct' UNION ALL SELECT 'Nov' UNION ALL SELECT 'Dec' UNION ALL 
+        SELECT 'Jan' UNION ALL SELECT 'Feb' UNION ALL SELECT 'Mar'
+    ) m;
+END$$
+
+DELIMITER ;
+
+SET SQL_SAFE_UPDATES = 0;
+
+UPDATE routes
+SET months = 'Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec, Jan, Feb, Mar'
+WHERE months IS NULL OR months = '';
+
+SET SQL_SAFE_UPDATES = 1;
+
+-- Table: class
+select * from routes;
+select * from route_plans;
+CREATE TABLE IF NOT EXISTS class (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+
+SELECT id, route_name, frequency, months FROM routes;
+-- Table: section
+CREATE TABLE IF NOT EXISTS section (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    class_id INT,
+    FOREIGN KEY (class_id)
+        REFERENCES class (id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255),
+  printAs VARCHAR(255),
+  accountGroup VARCHAR(100),
+  openingBalance DECIMAL(10,2),
+  drCr VARCHAR(5),
+  taxNo VARCHAR(50),
+  address1 VARCHAR(255),
+  address2 VARCHAR(255),
+  city VARCHAR(100),
+  pincode VARCHAR(20),
+  state VARCHAR(100),
+  stateCode VARCHAR(20),
+  mobile VARCHAR(20),
+  phone VARCHAR(20),
+  email VARCHAR(100),
+  contactPerson VARCHAR(100),
+  panCard VARCHAR(50),
+  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fees_headings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  feesHeading VARCHAR(255) NOT NULL,
+  groupName VARCHAR(255) NOT NULL,
+  frequency ENUM('Monthly', 'Annual') NOT NULL,
+  accountName VARCHAR(255) NOT NULL,
+  months TEXT NOT NULL
+);
+ALTER TABLE fees_register MODIFY COLUMN rec_no VARCHAR(50);
+CREATE TABLE IF NOT EXISTS fees_plan (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    feesHeading VARCHAR(100) NOT NULL,
+    value DECIMAL(10 , 2 ) NOT NULL,
+    className VARCHAR(50) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+select * from route_fees;
+
+ALTER TABLE fees_register ADD COLUMN feesHeading VARCHAR(255);
+-- Table: fees_register
+CREATE TABLE IF NOT EXISTS fees_register (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  date DATE NOT NULL,
+  receiptNo VARCHAR(50) NOT NULL,
+  admissionNumber VARCHAR(50) NOT NULL,
+  studentName VARCHAR(150),
+  className VARCHAR(50),
+  category VARCHAR(50),
+  routeName VARCHAR(50),
+  months TEXT,
+  fees DECIMAL(10,2),
+  total DECIMAL(10,2),
+  receivedAmount DECIMAL(10,2),
+  balanceAmount DECIMAL(10,2),
+  feesHeading VARCHAR(100),
+  lateFee DECIMAL(10,2),
+  discount DECIMAL(10,2)
+);
+
+DELIMITER $$
+
+CREATE PROCEDURE ApplyStudentFees(IN p_admissionNumber VARCHAR(132), IN p_month VARCHAR(20))
+BEGIN
+    DECLARE v_class VARCHAR(50);
+    DECLARE v_category VARCHAR(50);
+    DECLARE v_routeName VARCHAR(100);
+    DECLARE v_fees DECIMAL(10,2);
+    DECLARE v_route_fee DECIMAL(10,2);
+    DECLARE v_total_fee DECIMAL(10,2);
+    DECLARE v_student_name VARCHAR(200);
+    
+    -- Get student details
+    SELECT CONCAT(firstName, ' ', lastName),
+           class, category, routeName
+    INTO v_student_name, v_class, v_category, v_routeName
+    FROM students
+    WHERE admissionNumber = p_admissionNumber;
+
+    -- Get class/category fees
+    SELECT COALESCE(SUM(value), 0)
+    INTO v_fees
+    FROM fees_plan
+    WHERE className = v_class AND category = v_category;
+
+    -- Get route fee
+    SELECT COALESCE(price, 0)
+    INTO v_route_fee
+    FROM route_plans
+    WHERE class_name = v_class 
+      AND category_name = v_category 
+      AND route_name = v_routeName;
+
+    SET v_total_fee = v_fees + v_route_fee;
+
+    -- Insert fee record
+    INSERT INTO fees_register 
+        (date, rec_no, admissionNumber, student_name, class, category, route, months, fees, total, recd_amt, balance)
+    VALUES 
+        (CURDATE(), CONCAT('REC-', p_admissionNumber, '-', p_month), p_admissionNumber, v_student_name, v_class, v_category, v_routeName, p_month, v_total_fee, v_total_fee, 0, v_total_fee);
+END$$
+
+DELIMITER ;
+
+select * from fees_register;
+-- Disable SQL safe updates for development/testing
+SET SQL_SAFE_UPDATES = 0;
+CREATE OR REPLACE VIEW pending_fees_report AS
+SELECT 
+    s.admissionNumber,
+    CONCAT(s.firstName, ' ', s.lastName) AS student_name,
+    s.class,
+    s.category,
+    s.routeName,
+    sm.month,
+    COALESCE(fr.total, 0) AS total_fee_due,
+    COALESCE(fr.recd_amt, 0) AS received_amount,
+    COALESCE(fr.total, 0) - COALESCE(fr.recd_amt, 0) AS pending_amount
+FROM students s
+JOIN student_months sm ON sm.admissionNo = s.admissionNumber
+LEFT JOIN fees_register fr 
+    ON fr.admissionNumber = s.admissionNumber AND FIND_IN_SET(sm.month, fr.months)
+WHERE COALESCE(fr.total, 0) - COALESCE(fr.recd_amt, 0) > 0;
+CREATE TABLE IF NOT EXISTS student_months (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admissionNo VARCHAR(132),
+  month VARCHAR(20),
+  class_fee DECIMAL(10,2) DEFAULT 0,
+  route_fee DECIMAL(10,2) DEFAULT 0,
+  total_fee DECIMAL(10,2) DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS pending_fees (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admissionNumber VARCHAR(132) NOT NULL,
+  month VARCHAR(50) NOT NULL,
+  pendingAmount DECIMAL(10,2) NOT NULL,
+  status ENUM('Pending','Cleared') DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
